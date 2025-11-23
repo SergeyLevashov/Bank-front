@@ -17,7 +17,7 @@ export default function OutputPreview({
           <p className="text-xs text-slate-400">Превью отчёта</p>
           <p className="text-sm font-medium">
             {activeMode === "urgent"
-              ? "Сравнение Сбер vs конкурент"
+              ? "Сравнение Multi-Banking"
               : "Тренды по продукту"}
           </p>
         </div>
@@ -65,9 +65,9 @@ function UrgentPreviewContent({ data }) {
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-[11px] text-slate-400">Пара</p>
+        <p className="text-[11px] text-slate-400">Сравнение</p>
         <p className="text-[13px] font-semibold">
-          {data.bank_name} vs {data.competitor_name} · {data.product_type}
+          {data.bank_name} vs {data.competitor_names?.join(", ") || data.competitor_name} · {data.product_type}
         </p>
       </div>
 
@@ -78,10 +78,10 @@ function UrgentPreviewContent({ data }) {
             {data.bank_name}
           </div>
           <div className="px-3 py-2 font-medium text-sky-300">
-            {data.competitor_name}
+            Конкуренты
           </div>
         </div>
-        {data.comparison_table.map((row) => (
+        {data.comparison_table?.map((row) => (
           <div
             key={row.parameter}
             className="grid grid-cols-3 text-[11px] border-t border-slate-800/70"
@@ -108,6 +108,21 @@ function UrgentPreviewContent({ data }) {
           </ul>
         </div>
       )}
+
+      {/* Charts Display */}
+      {data.charts && Object.keys(data.charts).length > 0 && (
+        <div className="space-y-3">
+          <p className="text-[11px] text-slate-400">Графики сравнения</p>
+          {Object.entries(data.charts).map(([chartName, chartHtml]) => (
+            <div key={chartName} className="rounded-xl border border-slate-800 overflow-hidden bg-white">
+              <div 
+                dangerouslySetInnerHTML={{ __html: chartHtml }}
+                className="w-full"
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -118,27 +133,29 @@ function TrendsPreviewContent({ data }) {
       <div>
         <p className="text-[11px] text-slate-400">Продукт</p>
         <p className="text-[13px] font-semibold">
-          {data.bank_name} · {data.product_type} ({data.period})
+          {data.bank_names?.join(", ") || data.bank_name} · {data.product_type} ({data.period})
         </p>
       </div>
 
-      {/* простой мини-барчарт */}
-      <div>
-        <p className="text-[11px] text-slate-400 mb-2">Динамика показателя</p>
-        <div className="flex items-end gap-1 h-24">
-          {data.points.map((p) => (
-            <div key={p.label} className="flex-1 flex flex-col items-center">
-              <div
-                className="w-full rounded-full bg-gradient-to-t from-slate-800 to-brand-400/90"
-                style={{ height: `${20 + p.value * 2}%` }}
-              />
-              <span className="mt-1 text-[9px] text-slate-500">
-                {p.label.split(" ")[0]}
-              </span>
-            </div>
-          ))}
+      {/* Simple mini bar chart */}
+      {data.points && data.points.length > 0 && (
+        <div>
+          <p className="text-[11px] text-slate-400 mb-2">Динамика показателя</p>
+          <div className="flex items-end gap-1 h-24">
+            {data.points.map((p) => (
+              <div key={p.label} className="flex-1 flex flex-col items-center">
+                <div
+                  className="w-full rounded-full bg-gradient-to-t from-slate-800 to-brand-400/90"
+                  style={{ height: `${20 + p.value * 2}%` }}
+                />
+                <span className="mt-1 text-[9px] text-slate-500">
+                  {p.label.split(" ")[0]}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {data.summary?.length > 0 && (
         <div>
@@ -151,6 +168,21 @@ function TrendsPreviewContent({ data }) {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Charts Display */}
+      {data.charts && Object.keys(data.charts).length > 0 && (
+        <div className="space-y-3">
+          <p className="text-[11px] text-slate-400">Графики трендов</p>
+          {Object.entries(data.charts).map(([chartName, chartHtml]) => (
+            <div key={chartName} className="rounded-xl border border-slate-800 overflow-hidden bg-white">
+              <div 
+                dangerouslySetInnerHTML={{ __html: chartHtml }}
+                className="w-full"
+              />
+            </div>
+          ))}
         </div>
       )}
     </div>
