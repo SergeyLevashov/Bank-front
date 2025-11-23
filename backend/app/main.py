@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.api import urgent, trends
+from app.api import urgent, trends, banks
 
 
 settings = get_settings()
@@ -30,3 +30,4 @@ async def health_check():
 
 app.include_router(urgent.router, prefix="/api/urgent", tags=["urgent"])
 app.include_router(trends.router, prefix="/api/trends", tags=["trends"])
+app.include_router(banks.router, prefix="/api/banks", tags=["banks"])
