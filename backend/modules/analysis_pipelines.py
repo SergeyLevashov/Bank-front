@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from typing import List
 
@@ -8,6 +7,7 @@ from modules.normalizer import DataNormalizer
 from modules.comparator import ProductComparator
 from modules.llm_comparator import LLMComparator
 from modules.trends_analyzer import TrendsAnalyzer
+from modules.chart_generator import ChartGenerator
 
 # --- Helper mappings -------------------------------------------------------
 
@@ -91,6 +91,7 @@ _normalizer = DataNormalizer()
 _comparator = ProductComparator()
 _llm_comparator = LLMComparator()
 _trends_analyzer = TrendsAnalyzer()
+_chart_generator = ChartGenerator()
 
 
 # --- Urgent pipeline -------------------------------------------------------
@@ -98,35 +99,28 @@ _trends_analyzer = TrendsAnalyzer()
 
 async def run_urgent_pipeline(
     bank_name: str,
-    competitor_name: str,
+    competitor_names: List[str],  # Changed to list
     product_type: str,
 ) -> UrgentResponse:
-    """Real urgent pipeline based on comparator modules.
+    """Real urgent pipeline with multi-bank support.
 
     bank_name        – базовый банк (обычно Сбербанк)
-    competitor_name  – конкурент из пула
-    product_type     – человекочитаемый тип продукта, например 'Кредитная карта'
+    competitor_names – список конкурентов
+    product_type     – человекочитаемый тип продукта
     """
 
     base_bank_internal = _normalize_bank_name(bank_name)
-    competitor_internal = _normalize_bank_name(competitor_name)
     product_code = _normalize_product_type(product_type)
 
-    # Load raw JSON configs
+    # Load base bank data
     sber_raw = _scraper.get_product_data(base_bank_internal, product_code)
-    competitor_raw = _scraper.get_product_data(competitor_internal, product_code)
 
-    # Fallback structure from scraper returns mapping product_type -> data
-    # For normal files structure is:
-    #   { "банк": ..., "тип": ..., "карты": [...] }
     def _extract_first_card(raw: dict) -> dict:
         if not raw:
             return {}
-        # Normal config
         cards = raw.get("карты")
         if isinstance(cards, list) and cards:
             return cards[0]
-        # Fallback structure from _get_fallback_data
         if product_code in raw:
             cards = raw[product_code].get("карты")
             if isinstance(cards, list) and cards:
@@ -134,72 +128,91 @@ async def run_urgent_pipeline(
         return {}
 
     sber_card = _extract_first_card(sber_raw)
-    competitor_card = _extract_first_card(competitor_raw)
 
-    # Prefer LLM comparator when it is configured, otherwise classic comparator
-    use_llm = getattr(_llm_comparator, "is_enabled", lambda: False)()
-    if use_llm:
-        comparison_raw = _llm_comparator.compare_products(
-            sber_card,
-            competitor_card,
-            product_code,
-            competitor_name=competitor_internal,
-        )
-    else:
-        normalize_func_map = {
-            "credit_card": _normalizer.normalize_credit_card,
-            "debit_card": _normalizer.normalize_debit_card,
-            "deposit": _normalizer.normalize_deposit,
-            "consumer_loan": _normalizer.normalize_consumer_loan,
-        }
-        normalizer_fn = normalize_func_map.get(product_code)
-        if normalizer_fn is None:
-            raise ValueError(f"Unsupported product type: {product_code}")
+    # Process all competitors
+    all_comparison_items: List[ComparisonItem] = []
+    all_insights: List[str] = []
+    
+    for competitor_name in competitor_names:
+        competitor_internal = _normalize_bank_name(competitor_name)
+        competitor_raw = _scraper.get_product_data(competitor_internal, product_code)
+        competitor_card = _extract_first_card(competitor_raw)
 
-        sber_norm = normalizer_fn(sber_card, base_bank_internal)
-        competitor_norm = normalizer_fn(competitor_card, competitor_internal)
-
-        comparison_raw = _comparator.compare_products(
-            sber_norm,
-            competitor_norm,
-            product_code,
-        )
-
-    # comparison_raw contains a pandas DataFrame with columns
-    # ["Параметр", "Сбер", "Конкурент"]
-    df = comparison_raw.get("comparison_table")
-    if hasattr(df, "to_dict"):
-        rows = df.to_dict(orient="records")
-    else:
-        rows = []
-
-    comparison_items: List[ComparisonItem] = []
-    for row in rows:
-        parameter = str(row.get("Параметр", ""))
-        sber_value = str(row.get("Сбер", ""))
-        competitor_value = str(row.get("Конкурент", ""))
-        comparison_items.append(
-            ComparisonItem(
-                parameter=parameter,
-                sber_value=sber_value,
-                competitor_value=competitor_value,
+        # Prefer LLM comparator when available
+        use_llm = getattr(_llm_comparator, "is_enabled", lambda: False)()
+        if use_llm:
+            comparison_raw = _llm_comparator.compare_products(
+                sber_card,
+                competitor_card,
+                product_code,
+                competitor_name=competitor_internal,
             )
-        )
+        else:
+            normalize_func_map = {
+                "credit_card": _normalizer.normalize_credit_card,
+                "debit_card": _normalizer.normalize_debit_card,
+                "deposit": _normalizer.normalize_deposit,
+                "consumer_loan": _normalizer.normalize_consumer_loan,
+            }
+            normalizer_fn = normalize_func_map.get(product_code)
+            if normalizer_fn is None:
+                raise ValueError(f"Unsupported product type: {product_code}")
 
-    insights = comparison_raw.get("insights") or []
-    # If recommendation exists – add as last bullet
-    recommendation = comparison_raw.get("recommendation")
-    if recommendation:
-        insights = list(insights) + [recommendation]
+            sber_norm = normalizer_fn(sber_card, base_bank_internal)
+            competitor_norm = normalizer_fn(competitor_card, competitor_internal)
+
+            comparison_raw = _comparator.compare_products(
+                sber_norm,
+                competitor_norm,
+                product_code,
+            )
+
+        df = comparison_raw.get("comparison_table")
+        if hasattr(df, "to_dict"):
+            rows = df.to_dict(orient="records")
+        else:
+            rows = []
+
+        for row in rows:
+            parameter = str(row.get("Параметр", ""))
+            sber_value = str(row.get("Сбер", ""))
+            competitor_value = str(row.get("Конкурент", ""))
+            all_comparison_items.append(
+                ComparisonItem(
+                    parameter=f"{parameter} ({competitor_name})",
+                    sber_value=sber_value,
+                    competitor_value=competitor_value,
+                )
+            )
+
+        insights = comparison_raw.get("insights") or []
+        recommendation = comparison_raw.get("recommendation")
+        if recommendation:
+            insights = list(insights) + [recommendation]
+        all_insights.extend([f"{competitor_name}: {i}" for i in insights])
+
+    # Generate comparison chart
+    charts = {}
+    try:
+        if len(competitor_names) > 0:
+            # Create comparison data structure for chart
+            comparison_data = {
+                "comparison_table": comparison_raw.get("comparison_table")
+            }
+            fig = _chart_generator.generate_comparison_chart(comparison_data)
+            charts["comparison_chart"] = _chart_generator.save_chart_html(fig)
+    except Exception as e:
+        pass  # Charts are optional
 
     return UrgentResponse(
         bank_name=bank_name,
-        competitor_name=competitor_name,
+        competitor_names=competitor_names,
         product_type=product_type,
         generated_at=datetime.utcnow(),
-        comparison_table=comparison_items,
-        insights=insights,
+        comparison_table=all_comparison_items,
+        insights=all_insights,
         report_url=None,
+        charts=charts if charts else None,
     )
 
 
@@ -207,47 +220,76 @@ async def run_urgent_pipeline(
 
 
 async def run_trends_pipeline(
-    bank_name: str,
+    bank_names: List[str],  # Changed to list
     product_type: str,
     period: str,
 ) -> TrendsResponse:
-    """Trends pipeline based on TrendsAnalyzer.
+    """Trends pipeline with multi-bank support.
 
     Returns normalized points ready for frontend mini-chart.
     """
 
-    bank_internal = _normalize_bank_name(bank_name)
     product_code = _normalize_product_type(product_type)
     time_period = _normalize_period(period)
 
-    result = _trends_analyzer.analyze_trends(
-        bank=bank_internal,
-        product_type=product_code,
-        time_period=time_period,
-        use_real_search=False,
-    )
+    all_points: List[TrendPoint] = []
+    all_summary: List[str] = []
+    
+    banks_data = []
+    
+    for bank_name in bank_names:
+        bank_internal = _normalize_bank_name(bank_name)
 
-    timeline = result.get("timeline") or []
-    points: List[TrendPoint] = []
-    for item in timeline:
-        date_str = item.get("date")
-        rate = item.get("rate")
-        if date_str is None or rate is None:
-            continue
-        try:
-            value = float(rate)
-        except (TypeError, ValueError):
-            continue
-        label = _format_date_label(str(date_str))
-        points.append(TrendPoint(label=label, value=value))
+        result = _trends_analyzer.analyze_trends(
+            bank=bank_internal,
+            product_type=product_code,
+            time_period=time_period,
+            use_real_search=False,
+        )
 
-    summary = result.get("summary") or []
+        timeline = result.get("timeline") or []
+        points: List[TrendPoint] = []
+        for item in timeline:
+            date_str = item.get("date")
+            rate = item.get("rate")
+            if date_str is None or rate is None:
+                continue
+            try:
+                value = float(rate)
+            except (TypeError, ValueError):
+                continue
+            label = _format_date_label(str(date_str))
+            points.append(TrendPoint(label=f"{label} ({bank_name})", value=value))
+
+        all_points.extend(points)
+
+        summary = result.get("summary") or []
+        all_summary.extend([f"{bank_name}: {s}" for s in summary])
+        
+        banks_data.append({
+            "bank": bank_name,
+            "timeline": timeline
+        })
+
+    # Generate trends chart
+    charts = {}
+    try:
+        if len(banks_data) > 1:
+            fig = _chart_generator.generate_multiple_banks_comparison(banks_data)
+            charts["trends_chart"] = _chart_generator.save_chart_html(fig)
+        elif len(banks_data) == 1:
+            timeline = banks_data[0]["timeline"]
+            fig = _chart_generator.generate_timeline_chart(timeline)
+            charts["trends_chart"] = _chart_generator.save_chart_html(fig)
+    except Exception as e:
+        pass  # Charts are optional
 
     return TrendsResponse(
-        bank_name=bank_name,
+        bank_names=bank_names,
         product_type=product_type,
         period=period,
         generated_at=datetime.utcnow(),
-        summary=summary,
-        points=points,
+        summary=all_summary,
+        points=all_points,
+        charts=charts if charts else None,
     )
