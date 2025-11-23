@@ -35,7 +35,6 @@ def _normalize_product_type(label: str) -> str:
 
 
 BANK_NAME_MAP = {
-    # UI label -> internal name used in configs/file_mapping
     "сбер": "Сбер",
     "сбербанк": "Сбер",
     "sber": "Сбер",
@@ -99,7 +98,7 @@ _chart_generator = ChartGenerator()
 
 async def run_urgent_pipeline(
     bank_name: str,
-    competitor_names: List[str],  # Changed to list
+    competitor_names: List[str],
     product_type: str,
 ) -> UrgentResponse:
     """Real urgent pipeline with multi-bank support.
@@ -132,6 +131,7 @@ async def run_urgent_pipeline(
     # Process all competitors
     all_comparison_items: List[ComparisonItem] = []
     all_insights: List[str] = []
+    comparison_raw = None  # Store last comparison for chart generation
     
     for competitor_name in competitor_names:
         competitor_internal = _normalize_bank_name(competitor_name)
@@ -177,9 +177,14 @@ async def run_urgent_pipeline(
             parameter = str(row.get("Параметр", ""))
             sber_value = str(row.get("Сбер", ""))
             competitor_value = str(row.get("Конкурент", ""))
+            
+            # If multiple competitors, prefix parameter name
+            if len(competitor_names) > 1:
+                parameter = f"[{competitor_name}] {parameter}"
+            
             all_comparison_items.append(
                 ComparisonItem(
-                    parameter=f"{parameter} ({competitor_name})",
+                    parameter=parameter,
                     sber_value=sber_value,
                     competitor_value=competitor_value,
                 )
@@ -189,23 +194,28 @@ async def run_urgent_pipeline(
         recommendation = comparison_raw.get("recommendation")
         if recommendation:
             insights = list(insights) + [recommendation]
-        all_insights.extend([f"{competitor_name}: {i}" for i in insights])
+        
+        # Prefix insights with bank name if multiple competitors
+        if len(competitor_names) > 1:
+            all_insights.extend([f"{competitor_name}: {i}" for i in insights])
+        else:
+            all_insights.extend(insights)
 
     # Generate comparison chart
     charts = {}
     try:
-        if len(competitor_names) > 0:
-            # Create comparison data structure for chart
+        if comparison_raw and len(competitor_names) > 0:
             comparison_data = {
                 "comparison_table": comparison_raw.get("comparison_table")
             }
             fig = _chart_generator.generate_comparison_chart(comparison_data)
-            charts["comparison_chart"] = _chart_generator.save_chart_html(fig)
+            charts["comparison"] = _chart_generator.save_chart_html(fig)
     except Exception as e:
         pass  # Charts are optional
 
     return UrgentResponse(
         bank_name=bank_name,
+        competitor_name=competitor_names[0] if competitor_names else None,  # For backward compatibility
         competitor_names=competitor_names,
         product_type=product_type,
         generated_at=datetime.utcnow(),
@@ -220,7 +230,7 @@ async def run_urgent_pipeline(
 
 
 async def run_trends_pipeline(
-    bank_names: List[str],  # Changed to list
+    bank_names: List[str],
     product_type: str,
     period: str,
 ) -> TrendsResponse:
@@ -259,12 +269,20 @@ async def run_trends_pipeline(
             except (TypeError, ValueError):
                 continue
             label = _format_date_label(str(date_str))
-            points.append(TrendPoint(label=f"{label} ({bank_name})", value=value))
+            
+            # If multiple banks, add bank name to label
+            if len(bank_names) > 1:
+                points.append(TrendPoint(label=f"{label} ({bank_name})", value=value))
+            else:
+                points.append(TrendPoint(label=label, value=value))
 
         all_points.extend(points)
 
         summary = result.get("summary") or []
-        all_summary.extend([f"{bank_name}: {s}" for s in summary])
+        if len(bank_names) > 1:
+            all_summary.extend([f"{bank_name}: {s}" for s in summary])
+        else:
+            all_summary.extend(summary)
         
         banks_data.append({
             "bank": bank_name,
@@ -276,15 +294,16 @@ async def run_trends_pipeline(
     try:
         if len(banks_data) > 1:
             fig = _chart_generator.generate_multiple_banks_comparison(banks_data)
-            charts["trends_chart"] = _chart_generator.save_chart_html(fig)
+            charts["trends"] = _chart_generator.save_chart_html(fig)
         elif len(banks_data) == 1:
             timeline = banks_data[0]["timeline"]
             fig = _chart_generator.generate_timeline_chart(timeline)
-            charts["trends_chart"] = _chart_generator.save_chart_html(fig)
+            charts["trends"] = _chart_generator.save_chart_html(fig)
     except Exception as e:
         pass  # Charts are optional
 
     return TrendsResponse(
+        bank_name=bank_names[0] if bank_names else None,  # For backward compatibility
         bank_names=bank_names,
         product_type=product_type,
         period=period,
