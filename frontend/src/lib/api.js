@@ -8,6 +8,11 @@ async function handleResponse(res) {
   return res.json();
 }
 
+export async function fetchAvailableBanks() {
+  const res = await fetch(`${API_BASE_URL}/api/banks/available`);
+  return handleResponse(res);
+}
+
 export async function createUrgentReport(payload) {
   const res = await fetch(`${API_BASE_URL}/api/urgent/`, {
     method: "POST",
