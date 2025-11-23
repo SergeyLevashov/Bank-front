@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter
 
 from app.schemas import UrgentRequest, UrgentResponse
@@ -10,12 +9,11 @@ router = APIRouter()
 @router.post("/", response_model=UrgentResponse)
 async def create_urgent_report(payload: UrgentRequest) -> UrgentResponse:
     """
-    Urgent mode:
-    быстрый сравнительный отчёт базовый банк vs конкурент по одному продукту,
-    использующий реальные данные из конфигов и модулей анализа.
+    Urgent mode with multi-bank support:
+    быстрый сравнительный отчёт базовый банк vs несколько конкурентов по одному продукту.
     """
     return await run_urgent_pipeline(
         bank_name=payload.bank_name,
-        competitor_name=payload.competitor_name,
+        competitor_names=payload.competitor_names,
         product_type=payload.product_type,
     )
