@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 class UrgentRequest(BaseModel):
     bank_name: str = Field(..., description="Например: Сбербанк")
-    competitor_name: str = Field(..., description="Например: Райффайзенбанк")
+    competitor_names: List[str] = Field(..., description="Список конкурентов для сравнения")
     product_type: str = Field(..., description="Например: кредитная карта")
 
 
@@ -21,19 +21,20 @@ class ComparisonItem(BaseModel):
 
 class UrgentResponse(BaseModel):
     bank_name: str
-    competitor_name: str
+    competitor_names: List[str]  # Changed to list
     product_type: str
     generated_at: datetime
     comparison_table: List[ComparisonItem]
     insights: List[str]
     report_url: Optional[str] = None
+    charts: Optional[Dict[str, str]] = None  # Chart HTML strings keyed by chart name
 
 
 # ====== Trends Mode ======
 
 
 class TrendsRequest(BaseModel):
-    bank_name: str
+    bank_names: List[str] = Field(..., description="Список банков для анализа трендов")
     product_type: str
     period: str = Field(..., description="Например: 12m, 6m, 3m")
 
@@ -44,9 +45,10 @@ class TrendPoint(BaseModel):
 
 
 class TrendsResponse(BaseModel):
-    bank_name: str
+    bank_names: List[str]  # Changed to list
     product_type: str
     period: str
     generated_at: datetime
     summary: List[str]
     points: List[TrendPoint]
+    charts: Optional[Dict[str, str]] = None  # Chart HTML strings keyed by chart name
